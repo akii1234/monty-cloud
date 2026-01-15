@@ -3,21 +3,13 @@ set -euo pipefail
 
 STAGE="${STAGE:-local}"
 
-if ! command -v localstack >/dev/null 2>&1; then
-  echo "localstack is not installed. Install with: pip install localstack" >&2
+if ! command -v awslocal >/dev/null 2>&1; then
+  echo "awslocal is not installed. Install with: pip install awscli-local" >&2
   exit 1
 fi
 
-if ! command -v serverless >/dev/null 2>&1; then
-  echo "serverless is not installed. Install with: npm i -g serverless" >&2
-  exit 1
-fi
-
-echo "Starting LocalStack..."
-localstack start -d
-
-echo "Deploying Serverless (stage: ${STAGE})..."
-serverless deploy --stage "${STAGE}"
+echo "Deploying CloudFormation (stage: ${STAGE})..."
+bash "$(dirname "$0")/deploy_localstack.sh"
 
 echo "Fetching API ID..."
 API_ID="$(awslocal apigateway get-rest-apis --query 'items[0].id' --output text)"
