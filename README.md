@@ -5,7 +5,6 @@ Supports JSON base64 uploads and multipart/form-data uploads.
 
 ## Requirements
 - Python 3.7+
-- Node.js 18+ (for Serverless Framework)
 - LocalStack (for local AWS services)
 
 ## Setup
