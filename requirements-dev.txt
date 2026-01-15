@@ -1,0 +1,4 @@
+pytest==8.0.0
+moto[s3,dynamodb]==4.2.12
+freezegun==1.4.0
+
