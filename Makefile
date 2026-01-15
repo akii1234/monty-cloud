@@ -3,7 +3,7 @@ SHELL := /bin/bash
 
 VENV_DIR ?= .venv
 
-.PHONY: help venv install test clean bootstrap-localstack
+.PHONY: help venv install test clean bootstrap-localstack deploy-localstack
 
 help:
 	@echo "Targets:"
@@ -11,6 +11,7 @@ help:
 	@echo "  install            Install dependencies into venv"
 	@echo "  test               Run unit tests"
 	@echo "  bootstrap-localstack  Create local S3 bucket and DynamoDB table"
+	@echo "  deploy-localstack     Deploy CloudFormation stack to LocalStack"
 	@echo "  clean              Remove venv and caches"
 
 venv:
@@ -27,6 +28,10 @@ test: install
 bootstrap-localstack:
 	source $(VENV_DIR)/bin/activate && \
 	bash scripts/bootstrap_localstack.sh
+
+deploy-localstack:
+	source $(VENV_DIR)/bin/activate && \
+	bash scripts/deploy_localstack.sh
 
 clean:
 	rm -rf $(VENV_DIR) .pytest_cache __pycache__ tests/__pycache__

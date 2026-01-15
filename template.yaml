@@ -1,0 +1,414 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Monty Cloud Image Service (API Gateway + Lambda + S3 + DynamoDB)
+
+Parameters:
+  Stage:
+    Type: String
+    Default: local
+  ImagesBucketName:
+    Type: String
+    Default: monty-cloud-images-local
+  ImagesTableName:
+    Type: String
+    Default: monty-cloud-images-local
+  CodeS3Bucket:
+    Type: String
+  CodeS3Key:
+    Type: String
+  LocalstackEndpoint:
+    Type: String
+    Default: http://localhost:4566
+
+Resources:
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ImagesBucketName
+
+  ImagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ImagesTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: image_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: created_at
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: image_id_index
+          KeySchema:
+            - AttributeName: image_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaImagePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource: !Sub "arn:aws:s3:::${ImagesBucketName}/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ImagesTableName}"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ImagesTableName}/index/*"
+
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: monty-cloud-image-api
+
+  ApiGatewayRootResourceId:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: images
+
+  ApiGatewayUploadJsonResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !Ref ApiGatewayRootResourceId
+      PathPart: upload-json
+
+  ApiGatewayUploadMultipartResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !Ref ApiGatewayRootResourceId
+      PathPart: upload-multipart
+
+  ApiGatewayImageIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !Ref ApiGatewayRootResourceId
+      PathPart: "{imageId}"
+
+  ApiGatewayImageDownloadResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !Ref ApiGatewayImageIdResource
+      PathPart: download
+
+  ApiGatewayHealthResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: health
+
+  HealthFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monty-cloud-health
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Handler: src/handlers.health
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          LOCALSTACK_ENDPOINT: !Ref LocalstackEndpoint
+          IMAGES_BUCKET: !Ref ImagesBucketName
+          IMAGES_TABLE: !Ref ImagesTableName
+
+  UploadJsonFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monty-cloud-upload-json
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Handler: src/handlers.upload_json
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          LOCALSTACK_ENDPOINT: !Ref LocalstackEndpoint
+          IMAGES_BUCKET: !Ref ImagesBucketName
+          IMAGES_TABLE: !Ref ImagesTableName
+
+  UploadMultipartFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monty-cloud-upload-multipart
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Handler: src/handlers.upload_multipart
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          LOCALSTACK_ENDPOINT: !Ref LocalstackEndpoint
+          IMAGES_BUCKET: !Ref ImagesBucketName
+          IMAGES_TABLE: !Ref ImagesTableName
+
+  ListImagesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monty-cloud-list-images
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Handler: src/handlers.list_images
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          LOCALSTACK_ENDPOINT: !Ref LocalstackEndpoint
+          IMAGES_BUCKET: !Ref ImagesBucketName
+          IMAGES_TABLE: !Ref ImagesTableName
+
+  GetImageMetadataFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monty-cloud-get-image-metadata
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Handler: src/handlers.get_image_metadata
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          LOCALSTACK_ENDPOINT: !Ref LocalstackEndpoint
+          IMAGES_BUCKET: !Ref ImagesBucketName
+          IMAGES_TABLE: !Ref ImagesTableName
+
+  DownloadImageFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monty-cloud-download-image
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Handler: src/handlers.download_image
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          LOCALSTACK_ENDPOINT: !Ref LocalstackEndpoint
+          IMAGES_BUCKET: !Ref ImagesBucketName
+          IMAGES_TABLE: !Ref ImagesTableName
+
+  DeleteImageFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monty-cloud-delete-image
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Handler: src/handlers.delete_image
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          LOCALSTACK_ENDPOINT: !Ref LocalstackEndpoint
+          IMAGES_BUCKET: !Ref ImagesBucketName
+          IMAGES_TABLE: !Ref ImagesTableName
+
+  HealthMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayHealthResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HealthFunction.Arn}/invocations"
+
+  UploadJsonMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayUploadJsonResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UploadJsonFunction.Arn}/invocations"
+
+  UploadMultipartMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayUploadMultipartResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UploadMultipartFunction.Arn}/invocations"
+
+  ListImagesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayRootResourceId
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ListImagesFunction.Arn}/invocations"
+
+  GetImageMetadataMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayImageIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetImageMetadataFunction.Arn}/invocations"
+
+  DeleteImageMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayImageIdResource
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteImageFunction.Arn}/invocations"
+
+  DownloadImageMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayImageDownloadResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DownloadImageFunction.Arn}/invocations"
+
+  HealthPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HealthFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/GET/health"
+
+  UploadJsonPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref UploadJsonFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/images/upload-json"
+
+  UploadMultipartPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref UploadMultipartFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/images/upload-multipart"
+
+  ListImagesPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ListImagesFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/GET/images"
+
+  GetImageMetadataPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetImageMetadataFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/GET/images/*"
+
+  DeleteImagePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DeleteImageFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/DELETE/images/*"
+
+  DownloadImagePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DownloadImageFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/GET/images/*/download"
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - HealthMethod
+      - UploadJsonMethod
+      - UploadMultipartMethod
+      - ListImagesMethod
+      - GetImageMetadataMethod
+      - DeleteImageMethod
+      - DownloadImageMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: !Ref Stage
+
+Outputs:
+  ApiId:
+    Value: !Ref ApiGatewayRestApi
+  ApiBaseUrl:
+    Value: !Sub "http://localhost:4566/restapis/${ApiGatewayRestApi}/${Stage}/_user_request_"
+

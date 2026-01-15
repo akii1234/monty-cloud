@@ -3,6 +3,8 @@
 Base URL (local):
 `http://localhost:4566/restapis/<api-id>/local/_user_request_`
 
+Tip: run `bash scripts/deploy_localstack.sh` and use the printed Base URL.
+
 ## Health
 `GET /health`
 
